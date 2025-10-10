@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+opencv-python-headless
+numpy
+
+Pilih salah satu :
+    # pip install fastapi uvicorn opencv-python-headless numpy
+    # pip install -r requirements.txt
