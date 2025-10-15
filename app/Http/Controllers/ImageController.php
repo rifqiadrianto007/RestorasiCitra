@@ -18,26 +18,21 @@ class ImageController extends Controller
         $path = $request->file('image')->store('uploads', 'public');
         $localPath = storage_path('app/public/' . $path);
 
-        // Kirim ke service Python
-        $response = Http::attach(
-            'image',
-            fopen($localPath, 'r'),
-            basename($localPath)
-        )->post(env('PYTHON_WORKER_URL') . '/smooth', [
+        // Kirim ke worker Python
+        $response = \Http::attach('image', fopen($localPath, 'r'), basename($localPath))->post(env('PYTHON_WORKER_URL') . '/smooth', [
             'level' => $request->level,
         ]);
 
         if ($response->failed()) {
-            return response()->json(['error' => 'Worker error', 'detail' => $response->body()], 500);
+            return back()->withErrors(['msg' => 'Worker error: ' . $response->body()]);
         }
 
-        // Simpan hasil ke storage
         $outputName = 'processed/smooth_' . time() . '.png';
-        Storage::disk('public')->put($outputName, $response->body());
+        \Storage::disk('public')->put($outputName, $response->body());
 
-        return response()->json([
-            'url' => Storage::url($outputName),
-            'download' => Storage::url($outputName),
+        return back()->with('result', [
+            'url' => \Storage::url($outputName),
+            'download' => \Storage::url($outputName),
         ]);
     }
 }
