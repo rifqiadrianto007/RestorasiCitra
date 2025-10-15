@@ -10,6 +10,9 @@ Route::get('/smooth-form', function () {
 Route::get('/', function () {
     return response()->json(['message' => 'Image Restoration API ready']);
 });
+Route::get('/remove-form', function () {
+    return view('remove');
+});
 
 Route::post('/smooth', [ImageController::class, 'smooth'])->name('smooth.process');
-Route::post('/remove-background', [ImageController::class, 'removeBackground']);
+Route::post('/remove-background', [ImageController::class, 'removeBackground'])->name('remove.process');
