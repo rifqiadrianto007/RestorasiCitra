@@ -3,13 +3,14 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ImageController;
 
+Route::get('/', function () {
+    return view('landing');
+});
+
 Route::get('/smooth-form', function () {
     return view('smooth');
 });
 
-Route::get('/', function () {
-    return response()->json(['message' => 'Image Restoration API ready']);
-});
 Route::get('/remove-form', function () {
     return view('remove');
 });
