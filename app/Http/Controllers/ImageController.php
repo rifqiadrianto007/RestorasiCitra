@@ -19,8 +19,10 @@ class ImageController extends Controller
         $path = $uploaded->store('uploads', 'public');
         $localPath = storage_path('app/public/' . $path);
 
+        // URL worker Python dari .env atau default ke localhost
         $workerUrl = env('PYTHON_WORKER_URL', 'http://127.0.0.1:8001') . '/smooth';
 
+        // Kirim gambar ke worker Python
         try {
             $response = Http::attach('image', fopen($localPath, 'r'), basename($localPath))
                 ->post($workerUrl, ['level' => $request->level]);
@@ -32,6 +34,7 @@ class ImageController extends Controller
             return back()->withErrors(['msg' => 'Worker error: ' . $response->body()]);
         }
 
+        // Untuk menyimpan hasil
         $outputName = 'processed/smooth_' . time() . '_' . uniqid() . '.png';
         Storage::disk('public')->put($outputName, $response->body());
         @unlink($localPath);
@@ -51,8 +54,10 @@ class ImageController extends Controller
         $path = $request->file('image')->store('uploads', 'public');
         $localPath = storage_path('app/public/' . $path);
 
+        // URL worker Python dari .env atau default ke localhost
         $workerUrl = env('PYTHON_WORKER_URL', 'http://127.0.0.1:8001') . '/remove-background';
 
+        // Kirim gambar ke worker Python
         try {
             $response = Http::attach('image', fopen($localPath, 'r'), basename($localPath))
                 ->post($workerUrl);
@@ -64,6 +69,7 @@ class ImageController extends Controller
             return back()->withErrors(['msg' => 'Worker error: ' . $response->body()]);
         }
 
+        // Untuk menyimpan hasil
         $outputName = 'processed/removed_' . time() . '_' . uniqid() . '.png';
         Storage::disk('public')->put($outputName, $response->body());
         @unlink($localPath);
