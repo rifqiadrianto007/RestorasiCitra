@@ -44,39 +44,4 @@ class ImageController extends Controller
             'download' => Storage::url($outputName),
         ]);
     }
-
-    public function removeBackground(Request $request)
-    {
-        $request->validate([
-            'image' => 'required|image|max:10240',
-        ]);
-
-        $path = $request->file('image')->store('uploads', 'public');
-        $localPath = storage_path('app/public/' . $path);
-
-        // URL worker Python dari .env atau default ke localhost
-        $workerUrl = env('PYTHON_WORKER_URL', 'http://127.0.0.1:8001') . '/remove-background';
-
-        // Kirim gambar ke worker Python
-        try {
-            $response = Http::attach('image', fopen($localPath, 'r'), basename($localPath))
-                ->post($workerUrl);
-        } catch (Exception $e) {
-            return back()->withErrors(['msg' => 'Gagal terhubung ke worker: ' . $e->getMessage()]);
-        }
-
-        if ($response->failed()) {
-            return back()->withErrors(['msg' => 'Worker error: ' . $response->body()]);
-        }
-
-        // Untuk menyimpan hasil
-        $outputName = 'processed/removed_' . time() . '_' . uniqid() . '.png';
-        Storage::disk('public')->put($outputName, $response->body());
-        @unlink($localPath);
-
-        return back()->with('result', [
-            'url' => Storage::url($outputName),
-            'download' => Storage::url($outputName),
-        ]);
-    }
 }
