@@ -15,45 +15,46 @@ app.add_middleware(
 )
 
 @app.post("/smooth")
-async def smooth(image: UploadFile = File(...), level: int = Form(...)):
-    contents = await image.read()
-    nparr = np.frombuffer(contents, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        return Response(b'Invalid image', status_code=400, media_type="text/plain")
+async def smooth(image: UploadFile = File(...), level: int = Form(...)) :
+    contents = await image.read()  # Mendeteksi image yang diupload
+    nparr = np.frombuffer(contents, np.uint8) # Mengubah ke array numpy
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR) # Mendeteksi gambar yang sudah berbentuk array numpy
+    # Error handling jika yang diuopload bukan gambar
+    if img is None :
+        return Response(b'Invalid image', status_code = 400, media_type = "text/plain")
 
-    # Kernel ganjil minimal 1
+    # Mengecek nilai kernel ganjil dan >= 1
     kernel = int(level)
-    if kernel < 1:
+    if kernel < 1 :
         kernel = 1
-    if kernel % 2 == 0:
+    if kernel % 2 == 0 :
         kernel += 1
 
-    smoothed = cv2.GaussianBlur(img, (kernel, kernel), 0)
-    _, buffer = cv2.imencode(".png", smoothed)
-    return Response(buffer.tobytes(), media_type="image/png")
+    smoothed = cv2.GaussianBlur(img, (kernel, kernel), 0) # Melakukan smoothing
+    _, buffer = cv2.imencode(".png", smoothed) # Mengubah gambar ke format PNG
+    return Response(buffer.tobytes(), media_type = "image/png")
 
+# Fungsi untuk memastikan bilangan ganjil
 def ensure_odd(n):
     n = int(n)
     return n if n % 2 == 1 else n+1
 
 @app.post("/remove-background")
-async def remove_background(image: UploadFile = File(...)):
-    contents = await image.read()
-    nparr = np.frombuffer(contents, np.uint8)
-
-    # Baca dengan unchanged supaya alpha jika ada tetap terbaca
-    img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+async def remove_background(image: UploadFile = File(...)) :
+    contents = await image.read() # Mendeteksi image yang diupload
+    nparr = np.frombuffer(contents, np.uint8) # Mengubah ke array numpy
+    img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED) # Mendeteksi gambar yang sudah berbentuk array numpy
+    # Error handling jika yang diuopload bukan gambar
     if img is None:
-        return Response(b'Invalid image', status_code=400, media_type="text/plain")
+        return Response(b'Invalid image', status_code = 400, media_type = "text/plain")
 
-    # Jika gambar memiliki alpha, hapus dulu alpha untuk proses
-    if img.shape[2] == 4:
+    # Memastikan gambar dalam format BGR (jika ada alpha, dihapus)
+    if img.shape[2] == 4 :
         bgr = img[:, :, :3].copy()
     else:
         bgr = img
 
-    h0, w0 = bgr.shape[:2]
+    h0, w0 = bgr.shape[:2] # Mengembalikan gambar ke ukuran asli
 
     # Resize pekerjaan untuk kestabilan (jika terlalu besar), simpan scale
     max_dim = 1000
@@ -66,23 +67,21 @@ async def remove_background(image: UploadFile = File(...)):
     else:
         work = bgr.copy()
 
-    # Pra-pemrosesan: bilateral filter untuk menjaga tepi dan meredam noise
+    # Pra-pemrosesan : bilateral filter untuk menjaga tepi dan mengurangi noise
     work_blur = cv2.bilateralFilter(work, d=9, sigmaColor=75, sigmaSpace=75)
 
-    # Konversi ke grayscale & deteksi tepi untuk mengestimasi area objek
-    gray = cv2.cvtColor(work_blur, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(gray, 50, 150)
+    gray = cv2.cvtColor(work_blur, cv2.COLOR_BGR2GRAY) # Ubah ke grayscale
+    edges = cv2.Canny(gray, 50, 150) # Deteksi tepi
+
     # Perbesar area tepi jadi mask kasar
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-    edges_dil = cv2.dilate(edges, kernel, iterations=2)
+    edges_dil = cv2.dilate(edges, kernel, iterations = 2)
 
-    # Fill holes dan cari kontur terbesar (diasumsikan objek utama)
-    contours, _ = cv2.findContours(edges_dil, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(edges_dil, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE) # Menemukan kontur dari tepi
     if len(contours) == 0:
-        # fallback: gunakan Otsu threshold jika tidak ada kontur
+        # Menggunakan threshold Otsu ketika kontur tidak ditemukan
         _, mask_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        mask_init = cv2.bitwise_not(mask_otsu)
-        # convert mask to bounding rect
+        mask_init = cv2.bitwise_not(mask_otsu) # Invert biar objek utama jadi putih
         x,y,w,h = 0,0,work.shape[1],work.shape[0]
     else:
         # ambil kontur terbesar berdasarkan area
@@ -94,7 +93,7 @@ async def remove_background(image: UploadFile = File(...)):
         if cv2.contourArea(c) < min_area_threshold:
             x,y,w,h = 0,0,work.shape[1],work.shape[0]
 
-    # Expand rect sedikit supaya GrabCut punya margin
+    # Membuat rect sedikit lebih besar untuk memastikan objek utama tercover
     pad = int(0.05 * max(work.shape[0], work.shape[1]))
     rx = max(0, x - pad)
     ry = max(0, y - pad)
@@ -102,27 +101,25 @@ async def remove_background(image: UploadFile = File(...)):
     rh = min(work.shape[0] - ry, h + pad*2)
     rect = (rx, ry, rw, rh)
 
-    # Inisialisasi mask untuk grabCut
+    # Inisialisasi mask untuk menjalankan GrabCut
     mask_gc = np.zeros(work.shape[:2], np.uint8)
     bgdModel = np.zeros((1,65), np.float64)
     fgdModel = np.zeros((1,65), np.float64)
 
-    # Jalankan GrabCut dengan rect inisialisasi
+    # Menjalankan GrabCut dengan rect inisialisasi
     try:
         cv2.grabCut(work, mask_gc, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
     except Exception:
-        # fallback simple: threshold Otsu inverted
+        # Jika GrabCut gagal (misal area terlalu kecil), gunakan threshold Otsu
         _, mask_otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         mask_gc = cv2.bitwise_not(mask_otsu)
         mask_gc[mask_gc > 0] = cv2.GC_FGD
 
-    # Buat final mask: pixel yang terdeteksi foreground (sure+probable)
-    mask2 = np.where((mask_gc==cv2.GC_FGD) | (mask_gc==cv2.GC_PR_FGD), 255, 0).astype('uint8')
-
-    # Morphological ops untuk memperhalus mask
+    # Buat mask akhir dari hasil GrabCut
+    mask2 = np.where((mask_gc == cv2.GC_FGD) | (mask_gc == cv2.GC_PR_FGD), 255, 0).astype('uint8')
     kernel2 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7,7))
-    mask2 = cv2.morphologyEx(mask2, cv2.MORPH_CLOSE, kernel2, iterations=2)
-    mask2 = cv2.medianBlur(mask2, 5)
+    mask2 = cv2.morphologyEx(mask2, cv2.MORPH_CLOSE, kernel2, iterations=2) # Tutup lubang kecil
+    mask2 = cv2.medianBlur(mask2, 5) # Memberi sedikit median blur untuk haluskan tepi
 
     # Resize mask kembali ke ukuran asli jika sempat di-resize
     if scale != 1.0:
@@ -130,11 +127,9 @@ async def remove_background(image: UploadFile = File(...)):
     else:
         mask_full = mask2
 
-    # Feather / blur alpha untuk tepi halus
-    alpha = mask_full.astype(float) / 255.0
-    # kernel untuk feathering
-    alpha = cv2.GaussianBlur(alpha, (15,15), 0)
-    alpha = (alpha*255).astype(np.uint8)
+    alpha = mask_full.astype(float) / 255.0 # Membuat alpha channel dari mask
+    alpha = cv2.GaussianBlur(alpha, (15,15), 0) # Blur alpha untuk transisi halus
+    alpha = (alpha*255).astype(np.uint8) # Kembalikan ke 0 - 255
 
     # Pastikan gambar asal dalam ukuran asli
     if img.shape[2] == 4:
@@ -147,39 +142,6 @@ async def remove_background(image: UploadFile = File(...)):
     rgba = cv2.cvtColor(bgr_orig, cv2.COLOR_BGR2BGRA)
     rgba[:, :, 3] = alpha
 
-    # Optional: trim small fully-transparent border (tidak wajib)
-
-    # Encode ke PNG dan return
+    # Mengubah hasil ke format PNG
     _, buffer = cv2.imencode(".png", rgba)
-    return Response(buffer.tobytes(), media_type="image/png")
-
-    contents = await image.read()
-    nparr = np.frombuffer(contents, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
-
-    if img is None:
-        return Response(b'Invalid image', status_code=400, media_type="text/plain")
-
-    # Ubah ke grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # Gunakan threshold adaptif sederhana
-    _, mask = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-
-    # Pastikan objek utama tetap (jika terbalik)
-    if np.mean(img[mask == 255]) > np.mean(img[mask == 0]):
-        mask = cv2.bitwise_not(mask)
-
-    # Sedikit perbaikan mask
-    mask = cv2.medianBlur(mask, 5)
-
-    # Buat alpha channel
-    alpha = mask
-
-    # Gabungkan RGB + Alpha
-    rgba = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
-    rgba[:, :, 3] = alpha
-
-    # Simpan hasil
-    _, buffer = cv2.imencode(".png", rgba)
-    return Response(buffer.tobytes(), media_type="image/png")
+    return Response(buffer.tobytes(), media_type = "image/png")
